@@ -376,6 +376,34 @@ async function handleStat(params, workspaceRoot, agentId) {
   }, null, {});
 }
 
+// Return the canonicalized allowedPaths entries for the current agent/workspace
+async function handleGetAllowedPaths(params, workspaceRoot, agentId) {
+  try {
+    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot) || [];
+    const normalizedRoot = path.resolve(workspaceRoot);
+    const items = allowed.map((p) => {
+      const item = { selected: true, realpath: p };
+      try {
+        const stat = fs.statSync(p);
+        item.isDirectory = stat.isDirectory();
+        if (stat.isFile()) item.sizeBytes = stat.size;
+      } catch (e) {
+        item.isDirectory = false;
+      }
+      try {
+        if (p === normalizedRoot || p.startsWith(normalizedRoot + path.sep)) {
+          item.relpath = toRelativePosix(p, workspaceRoot);
+        }
+      } catch (e) { /* ignore */ }
+      return item;
+    });
+
+    respond(true, { allowedPaths: items }, null);
+  } catch (err) {
+    respond(false, null, `Failed to load allowed paths: ${err.message}`);
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 const ACTION_MAP = {
@@ -387,6 +415,7 @@ const ACTION_MAP = {
   listFiles: handleListDirectory,
   list: handleListDirectory,
   stat: handleStat,
+  getAllowedPaths: handleGetAllowedPaths,
 };
 
 let inputData = '';

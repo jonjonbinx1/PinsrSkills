@@ -25,7 +25,7 @@ ui:
 
 # File System Skill
 
-Provides filesystem operations within the agent workspace. All paths are resolved relative to the agent workspace root and sandboxed to prevent directory traversal.
+Provides filesystem operations within the agent workspace. All paths are either resolved relative to the agent workspace root and sandboxed to prevent directory traversal or are part of the allowed file paths.
 
 ## Supported Actions
 
@@ -35,6 +35,7 @@ Provides filesystem operations within the agent workspace. All paths are resolve
 - **deleteFile** — Delete a file
 - **listDirectory** — List directory contents (aliases: `listFiles`, `list`)
 - **stat** — Get file/directory metadata
+- **getAllowedPaths** — Get the list of allowed file paths configured for this skill
 
 ## Invocation Example
 
