@@ -246,16 +246,25 @@ function toRelativePosix(resolvedPath, workspaceRoot) {
 async function handleReadFile(params, workspaceRoot, agentId) {
   const { path: filePath, encoding = 'utf8' } = params;
   if (!filePath) return respond(false, null, 'Missing required param: path');
-  const { safe, resolved, error } = resolveSafePath(filePath, workspaceRoot);
-  if (!safe) return respond(false, null, error);
+  // Load allowlist first
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
 
-  // Enforce allowedPaths policy (if configured)
-  try {
-    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    // absolute path: resolve and allow only if present in allowed list
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
     if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
       return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
     }
-  } catch (e) { /* on error, fall through to normal checks */ }
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+    }
+  }
 
   const relRequested = toRelativePosix(resolved, workspaceRoot);
   if (!fs.existsSync(resolved)) {
@@ -281,16 +290,22 @@ async function handleWriteFile(params, workspaceRoot, agentId) {
   const { path: filePath, content, encoding = 'utf8' } = params;
   if (!filePath) return respond(false, null, 'Missing required param: path');
   if (content === undefined || content === null) return respond(false, null, 'Missing required param: content');
-  const { safe, resolved, error } = resolveSafePath(filePath, workspaceRoot);
-  if (!safe) return respond(false, null, error);
-
-  // Enforce allowedPaths policy (if configured)
-  try {
-    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
     if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
       return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
     }
-  } catch (e) {}
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+    }
+  }
 
   const contentBuffer = Buffer.from(content, encoding);
   if (contentBuffer.length > MAX_FILE_SIZE) {
@@ -316,17 +331,22 @@ async function handleAppendFile(params, workspaceRoot, agentId) {
   const { path: filePath, content, encoding = 'utf8' } = params;
   if (!filePath) return respond(false, null, 'Missing required param: path');
   if (content === undefined || content === null) return respond(false, null, 'Missing required param: content');
-
-  const { safe, resolved, error } = resolveSafePath(filePath, workspaceRoot);
-  if (!safe) return respond(false, null, error);
-
-  // Enforce allowedPaths policy (if configured)
-  try {
-    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
     if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
       return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
     }
-  } catch (e) {}
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+    }
+  }
 
   const contentBuffer = Buffer.from(content, encoding);
   if (contentBuffer.length > MAX_FILE_SIZE) {
@@ -350,9 +370,22 @@ async function handleAppendFile(params, workspaceRoot, agentId) {
 async function handleDeleteFile(params, workspaceRoot, agentId) {
   const { path: filePath } = params;
   if (!filePath) return respond(false, null, 'Missing required param: path');
-
-  const { safe, resolved, error } = resolveSafePath(filePath, workspaceRoot);
-  if (!safe) return respond(false, null, error);
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+    }
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+    }
+  }
 
   const relRequested = toRelativePosix(resolved, workspaceRoot);
   if (!fs.existsSync(resolved)) {
@@ -368,9 +401,22 @@ async function handleDeleteFile(params, workspaceRoot, agentId) {
 
 async function handleListDirectory(params, workspaceRoot, agentId) {
   const { path: dirPath = '.', recursive = false } = params;
-
-  const { safe, resolved, error } = resolveSafePath(dirPath, workspaceRoot);
-  if (!safe) return respond(false, null, error);
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(dirPath)) {
+    resolved = path.resolve(dirPath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${dirPath}`);
+    }
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(dirPath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${dirPath}`);
+    }
+  }
 
   const relRequested = toRelativePosix(resolved, workspaceRoot);
   if (!fs.existsSync(resolved)) {
@@ -383,14 +429,6 @@ async function handleListDirectory(params, workspaceRoot, agentId) {
   }
 
   log(agentId, 'DEBUG', `listDirectory: ${resolved}`);
-
-  // Enforce allowedPaths policy (if configured)
-  try {
-    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
-    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
-      return respond(false, null, `Access denied by allowedPaths policy: ${dirPath}`);
-    }
-  } catch (e) {}
 
   const entries = fs.readdirSync(resolved, { withFileTypes: true });
   const items = entries.map((entry) => {
@@ -408,17 +446,22 @@ async function handleListDirectory(params, workspaceRoot, agentId) {
 async function handleStat(params, workspaceRoot, agentId) {
   const { path: filePath } = params;
   if (!filePath) return respond(false, null, 'Missing required param: path');
-
-  const { safe, resolved, error } = resolveSafePath(filePath, workspaceRoot);
-  if (!safe) return respond(false, null, error);
-
-  // Enforce allowedPaths policy (if configured)
-  try {
-    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
     if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
       return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
     }
-  } catch (e) {}
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+    }
+  }
   const relRequested = toRelativePosix(resolved, workspaceRoot);
   if (!fs.existsSync(resolved)) {
     return respond(false, { path: relRequested }, `Path not found: ${relRequested}`);
