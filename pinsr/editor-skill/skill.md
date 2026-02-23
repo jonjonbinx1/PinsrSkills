@@ -9,6 +9,18 @@ permissions:
   - "filesystem:write"
 tags: ["editor","patch"]
 contributor: "pinsr"
+ui:
+  fields:
+    - key: allowedPaths
+      label: "Allowed Paths"
+      type: array
+      itemType: file
+      description: "Folders or files the editor skill may edit. Matches the fs-skill allowedPaths UI so editors only expose permitted files."
+      hint:
+        picker: "both"
+        allowExternal: false
+        preferRelpath: true
+        multiple: false
 ---
 
 # Editor Skill
