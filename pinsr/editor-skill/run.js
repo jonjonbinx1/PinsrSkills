@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+
 const PINSR_ROOT = path.join(os.homedir(), '.pinsrAI');
 
 // ─── Logging ────────────────────────────────────────────────────────────────
@@ -53,6 +54,121 @@ function resolveSafePath(relativePath, workspaceRoot) {
   }
   return { safe: true, resolved, error: null };
 }
+
+// ─── Local fs-skill-like allowlist helpers (copied/adapted) ───────────────
+const SKILL_NAME = 'fs-skill';
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+function fileExists(p) {
+  try { return fs.existsSync(p); } catch { return false; }
+}
+
+function parseNamedYamlList(name, content) {
+  const lines = content.split(/\r?\n/);
+  let inBlock = false;
+  const results = [];
+  const inlineRegex = new RegExp(`^${name}:\\s*\\[(.*)\\]\\s*$`);
+  const blockStartRegex = new RegExp(`^${name}:\\s*$`);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!inBlock) {
+      const inlineMatch = line.match(inlineRegex);
+      if (inlineMatch) {
+        const inner = inlineMatch[1].trim();
+        if (inner) {
+          const parts = inner.split(/,\s*/).map(s => s.replace(/^\s*['\"]?|['\"]?\s*$/g, ''));
+          parts.forEach(p => { if (p) results.push(p); });
+        }
+        continue;
+      }
+      if (line.startsWith(name + ':')) {
+        if (blockStartRegex.test(line)) { inBlock = true; continue; }
+      }
+    } else {
+      if (/^[\-]\s+/.test(line)) {
+        const entry = line.replace(/^[\-]\s+/, '').replace(/^[\'"]|[\'\"]$/g, '');
+        if (entry) results.push(entry);
+        continue;
+      }
+      if (line && !line.startsWith('-')) break;
+    }
+  }
+  return results;
+}
+
+function parseAllowedPathsFromYaml(content) { return parseNamedYamlList('allowedPaths', content); }
+
+function loadAllowedPathsConfig(agentId, workspaceRoot) {
+  try {
+    const agentConfig = path.join(PINSR_ROOT, 'agents', agentId, 'skill-config', `${SKILL_NAME}.yaml`);
+    const globalConfig = path.join(PINSR_ROOT, 'skill-config', `${SKILL_NAME}.yaml`);
+
+    let content = null;
+    let source = null;
+    if (fileExists(agentConfig)) { content = fs.readFileSync(agentConfig, 'utf8'); source = 'agent'; }
+    else if (fileExists(globalConfig)) { content = fs.readFileSync(globalConfig, 'utf8'); source = 'global'; }
+    if (!content) return [];
+
+    const entries = parseAllowedPathsFromYaml(content);
+    const externalEntriesRaw = parseNamedYamlList('externalAllowedPaths', content);
+    const resolved = [];
+    const externalResolved = [];
+    for (const ex of externalEntriesRaw) {
+      if (!ex || String(ex).trim() === '') continue;
+      let exCand = ex;
+      if (!path.isAbsolute(exCand)) exCand = path.resolve(workspaceRoot, exCand);
+      else exCand = path.resolve(exCand);
+      try { if (fileExists(exCand)) exCand = fs.realpathSync(exCand); } catch (err) { }
+      externalResolved.push(exCand);
+      resolved.push(exCand);
+    }
+
+    for (const e of entries) {
+      if (!e || String(e).trim() === '') continue;
+      let candidate = e;
+      if (!path.isAbsolute(candidate)) candidate = path.resolve(workspaceRoot, candidate);
+      else candidate = path.resolve(candidate);
+      try { if (fileExists(candidate)) candidate = fs.realpathSync(candidate); } catch (err) { }
+
+      const normalizedRoot = path.resolve(workspaceRoot);
+      if (candidate === normalizedRoot || candidate.startsWith(normalizedRoot + path.sep)) {
+        resolved.push(candidate);
+        continue;
+      }
+
+      if (path.isAbsolute(e)) {
+        let added = false;
+        for (const ex of externalResolved) {
+          if (ex === candidate) { resolved.push(candidate); added = true; break; }
+        }
+        if (!added && source === 'agent') {
+          resolved.push(candidate);
+        }
+      }
+    }
+    return resolved;
+  } catch (err) {
+    return [];
+  }
+}
+
+function isTargetAllowedByList(targetResolved, allowedList, workspaceRoot) {
+  if (!allowedList || allowedList.length === 0) return true;
+  for (const allowed of allowedList) {
+    if (!allowed) continue;
+    const a = path.resolve(allowed);
+    try {
+      if (fs.existsSync(a) && fs.statSync(a).isDirectory()) {
+        if (targetResolved === a || targetResolved.startsWith(a + path.sep)) return true;
+      } else {
+        if (targetResolved === a) return true;
+      }
+    } catch (e) { continue; }
+  }
+  return false;
+}
+
+
 
 // ─── Unified diff parser (minimal but functional) ───────────────────────────
 
@@ -251,10 +367,21 @@ async function handleGitDiff(patchStr, workspaceRoot, agentId, confirm, startTim
   for (const patchData of patches) {
     const filePath = patchData.newFile || patchData.oldFile;
     if (!filePath) continue;
-
-    const { safe, resolved, error } = resolveSafePath(filePath, workspaceRoot);
-    if (!safe) {
-      return respond(false, null, error);
+    let resolved;
+    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+    if (path.isAbsolute(filePath)) {
+      resolved = path.resolve(filePath);
+      try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+      if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+        return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+      }
+    } else {
+      const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+      if (!safe) return respond(false, null, error);
+      resolved = r;
+      if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+        return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+      }
     }
 
     summary.filesChanged.push(filePath);
@@ -313,12 +440,23 @@ async function handleJsonPatch(patchInput, targetFile, workspaceRoot, agentId, c
   if (!targetFile) {
     return respond(false, null, 'json-patch format requires param: targetFile');
   }
-
-  const { safe, resolved, error } = resolveSafePath(targetFile, workspaceRoot);
-  if (!safe) return respond(false, null, error);
-
-  if (!fs.existsSync(resolved)) {
-    return respond(false, null, `Target file not found: ${targetFile}`);
+  let resolved;
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  if (path.isAbsolute(targetFile)) {
+    resolved = path.resolve(targetFile);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${targetFile}`);
+    }
+    if (!fs.existsSync(resolved)) return respond(false, null, `Target file not found: ${targetFile}`);
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(targetFile, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+      return respond(false, null, `Access denied by allowedPaths policy: ${targetFile}`);
+    }
+    if (!fs.existsSync(resolved)) return respond(false, null, `Target file not found: ${targetFile}`);
   }
 
   let operations;
