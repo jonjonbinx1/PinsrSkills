@@ -1,6 +1,6 @@
 ---
 name: "fs-skill"
-version: "1.0.0"
+version: "1.0.1"
 description: "Read and modify files in the agent workspace."
 requires_code: true
 entrypoint: "run.js"
@@ -14,12 +14,11 @@ ui:
     - key: allowedPaths
       label: "Allowed Paths"
       type: array
-      itemType: text
-      description: "Folders or files the fs skill may access. Use the Browse button to add entries; picks inside the workspace will be saved as workspace-relative paths for portability."
-      placeholder: "./relative/path or select with Browse"
+      itemType: file
+      description: "Folders or files the fs skill may access. Use Browse to add each entry; workspace-inside picks are stored as relative paths for portability."
       hint:
-        picker: "both"
-        allowExternal: false
+        picker: "both"          # allow file or directory selection
+        allowExternal: false    # external absolute paths require admin allowlist
         preferRelpath: true
         multiple: false
 ---
