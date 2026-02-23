@@ -1,6 +1,6 @@
 ---
 name: "fs-skill"
-version: "1.0.2"
+version: "1.0.3"
 description: "Read and modify files in the agent workspace."
 requires_code: true
 entrypoint: "run.js"
