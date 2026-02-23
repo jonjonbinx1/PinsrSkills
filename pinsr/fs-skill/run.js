@@ -510,6 +510,55 @@ async function handleGetAllowedPaths(params, workspaceRoot, agentId) {
   }
 }
 
+// Check existence of a path (file or directory). Returns canonical info.
+async function handleExists(params, workspaceRoot, agentId) {
+  try {
+    const { path: target } = params;
+    if (!target) return respond(false, null, 'Missing required param: path');
+
+    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+    let resolved;
+    if (path.isAbsolute(target)) {
+      resolved = path.resolve(target);
+      try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+      if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+        return respond(false, null, `Access denied by allowedPaths policy: ${target}`);
+      }
+    } else {
+      const { safe, resolved: r, error } = resolveSafePath(target, workspaceRoot);
+      if (!safe) return respond(false, null, error);
+      resolved = r;
+      if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+        return respond(false, null, `Access denied by allowedPaths policy: ${target}`);
+      }
+    }
+
+    const exists = fs.existsSync(resolved);
+    if (!exists) {
+      const rel = toRelativePosix(resolved, workspaceRoot);
+      return respond(true, { exists: false, realpath: resolved, relpath: rel }, null);
+    }
+
+    const stat = fs.statSync(resolved);
+    const item = {
+      exists: true,
+      realpath: resolved,
+      isFile: stat.isFile(),
+      isDirectory: stat.isDirectory(),
+    };
+    if (stat.isFile()) item.sizeBytes = stat.size;
+    try {
+      if (resolved === path.resolve(workspaceRoot) || resolved.startsWith(path.resolve(workspaceRoot) + path.sep)) {
+        item.relpath = toRelativePosix(resolved, workspaceRoot);
+      }
+    } catch (e) {}
+
+    respond(true, item, null);
+  } catch (err) {
+    respond(false, null, `exists check failed: ${err.message}`);
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 const ACTION_MAP = {
@@ -518,10 +567,12 @@ const ACTION_MAP = {
   appendFile: handleAppendFile,
   deleteFile: handleDeleteFile,
   listDirectory: handleListDirectory,
+  listDir: handleListDirectory,
   listFiles: handleListDirectory,
   list: handleListDirectory,
   stat: handleStat,
   getAllowedPaths: handleGetAllowedPaths,
+  exists: handleExists,
 };
 
 let inputData = '';
