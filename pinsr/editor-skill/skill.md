@@ -30,6 +30,17 @@ Apply structured edits and patches to files in the agent workspace. Supports uni
 ## Supported Actions
 
 - **applyPatch** — Apply a unified diff or JSON patch to workspace files
+ - **openFile** — Read a file (if permitted) with support for line- or byte-range. Params: `path` (required), `range` ("start-end" or [start,end]), `unit` ("lines"|"bytes", default "lines"), `encoding`.
+
+Examples:
+
+```
+[SKILL:editor-skill]{"action":"openFile","params":{"path":"README.md","range":"0-99","unit":"lines"}}
+```
+
+```
+[SKILL:editor-skill]{"action":"openFile","params":{"path":"/absolute/path/to/log.txt","range":"0-1023","unit":"bytes"}}
+```
 
 ## Invocation Example
 

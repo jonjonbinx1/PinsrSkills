@@ -504,6 +504,92 @@ async function handleJsonPatch(patchInput, targetFile, workspaceRoot, agentId, c
   }
 }
 
+// Read a file within allowed paths. Supports line-range or byte-range.
+async function handleOpenFile(params, workspaceRoot, agentId) {
+  try {
+    const { path: filePath, range, unit = 'lines', encoding = 'utf8', maxLines } = params || {};
+    if (!filePath) return respond(false, null, 'Missing required param: path');
+
+    const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+    let resolved;
+    if (path.isAbsolute(filePath)) {
+      resolved = path.resolve(filePath);
+      try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+      if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+        return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+      }
+    } else {
+      const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+      if (!safe) return respond(false, null, error);
+      resolved = r;
+      if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+        return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+      }
+    }
+
+    if (!fs.existsSync(resolved)) return respond(false, null, `File not found: ${filePath}`);
+
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) return respond(false, null, `Not a file: ${filePath}`);
+
+    // Default: first 100 lines
+    let start = 0, end = 99;
+    if (range) {
+      if (typeof range === 'string' && range.includes('-')) {
+        const parts = range.split('-').map(s => parseInt(s, 10));
+        if (!Number.isNaN(parts[0])) start = Math.max(0, parts[0]);
+        if (!Number.isNaN(parts[1])) end = Math.max(start, parts[1]);
+      } else if (Array.isArray(range) && range.length === 2) {
+        start = Math.max(0, parseInt(range[0], 10) || 0);
+        end = Math.max(start, parseInt(range[1], 10) || start);
+      }
+    } else if (maxLines) {
+      start = 0; end = Math.max(0, parseInt(maxLines, 10) - 1);
+    }
+
+    if (unit === 'bytes') {
+      const buf = fs.readFileSync(resolved);
+      const total = buf.length;
+      const bstart = start; const bend = Math.min(end, total - 1);
+      const slice = buf.slice(bstart, bend + 1);
+      const text = slice.toString(encoding);
+      const rel = toRelativePosix(resolved, workspaceRoot);
+      return respond(true, {
+        path: rel,
+        realpath: resolved,
+        unit: 'bytes',
+        start: bstart,
+        end: bend,
+        totalBytes: total,
+        content: text,
+        truncated: (bend < total - 1),
+      }, null, { size: stat.size, mtime: stat.mtime.toISOString() });
+    }
+
+    // lines
+    const content = fs.readFileSync(resolved, encoding);
+    const lines = content.split(/\r?\n/);
+    const totalLines = lines.length;
+    const s = Math.max(0, start);
+    const e = Math.min(end, totalLines - 1);
+    const slice = lines.slice(s, e + 1).join('\n');
+    const rel = toRelativePosix(resolved, workspaceRoot);
+    return respond(true, {
+      path: rel,
+      realpath: resolved,
+      unit: 'lines',
+      start: s,
+      end: e,
+      totalLines,
+      content: slice,
+      truncated: (e < totalLines - 1),
+    }, null, { size: stat.size, mtime: stat.mtime.toISOString() });
+
+  } catch (err) {
+    return respond(false, null, `openFile failed: ${err.message}`);
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 let inputData = '';
@@ -517,15 +603,24 @@ process.stdin.on('end', () => {
     const agentId = context.agentId || '_unknown';
     const cwd = context.cwd || process.cwd();
 
-    if (action !== 'applyPatch') {
-      respond(false, null, `Unknown action: "${action}". Supported: applyPatch`, { durationMs: Date.now() - startTime });
+    // Supported actions: applyPatch, openFile
+    if (action === 'applyPatch') {
+      handleApplyPatch(params, cwd, agentId).catch((err) => {
+        log(agentId, 'ERROR', `applyPatch failed: ${err.message}`);
+        respond(false, null, `applyPatch failed: ${err.message}`, { durationMs: Date.now() - startTime });
+      });
       return;
     }
 
-    handleApplyPatch(params, cwd, agentId).catch((err) => {
-      log(agentId, 'ERROR', `applyPatch failed: ${err.message}`);
-      respond(false, null, `applyPatch failed: ${err.message}`, { durationMs: Date.now() - startTime });
-    });
+    if (action === 'openFile') {
+      handleOpenFile(params, cwd, agentId).catch((err) => {
+        log(agentId, 'ERROR', `openFile failed: ${err.message}`);
+        respond(false, null, `openFile failed: ${err.message}`, { durationMs: Date.now() - startTime });
+      });
+      return;
+    }
+
+    respond(false, null, `Unknown action: "${action}". Supported: applyPatch, openFile`, { durationMs: Date.now() - startTime });
   } catch (err) {
     respond(false, null, `Failed to parse input: ${err.message}`, { durationMs: Date.now() - startTime });
   }
