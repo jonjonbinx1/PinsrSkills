@@ -68,6 +68,42 @@ function parseAllowedPathsFromYaml(content) {
   return results;
 }
 
+function parseNamedYamlList(name, content) {
+  // Minimal YAML parsing to extract top-level `<name>:` array.
+  const lines = content.split(/\r?\n/);
+  let inBlock = false;
+  const results = [];
+  const inlineRegex = new RegExp(`^${name}:\\s*\\[(.*)\\]\\s*$`);
+  const blockStartRegex = new RegExp(`^${name}:\\s*$`);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!inBlock) {
+      const inlineMatch = line.match(inlineRegex);
+      if (inlineMatch) {
+        const inner = inlineMatch[1].trim();
+        if (inner) {
+          const parts = inner.split(/,\s*/).map(s => s.replace(/^\s*['\"]?|['\"]?\s*$/g, ''));
+          parts.forEach(p => { if (p) results.push(p); });
+        }
+        continue;
+      }
+      if (line.startsWith(name + ':')) {
+        if (blockStartRegex.test(line)) { inBlock = true; continue; }
+      }
+    } else {
+      if (/^[\-]\s+/.test(line)) {
+        const entry = line.replace(/^[\-]\s+/, '').replace(/^['\"]|['\"]$/g, '');
+        if (entry) results.push(entry);
+        continue;
+      }
+      if (line && !line.startsWith('-')) break;
+    }
+  }
+  return results;
+}
+
+function parseAllowedPathsFromYaml(content) { return parseNamedYamlList('allowedPaths', content); }
+
 function loadAllowedPathsConfig(agentId, workspaceRoot) {
   // Precedence: per-agent -> global. Returns array of absolute resolved allowed paths (only those inside workspaceRoot).
   try {
@@ -80,20 +116,40 @@ function loadAllowedPathsConfig(agentId, workspaceRoot) {
     if (!content) return [];
 
     const entries = parseAllowedPathsFromYaml(content);
+    const externalEntriesRaw = parseNamedYamlList('externalAllowedPaths', content);
     const resolved = [];
+    // Resolve externalAllowedPaths entries to canonical absolute paths for comparison
+    const externalResolved = [];
+    for (const ex of externalEntriesRaw) {
+      if (!ex || String(ex).trim() === '') continue;
+      let exCand = ex;
+      if (!path.isAbsolute(exCand)) exCand = path.resolve(workspaceRoot, exCand);
+      else exCand = path.resolve(exCand);
+      try { if (fileExists(exCand)) exCand = fs.realpathSync(exCand); } catch (err) { /* keep exCand */ }
+      externalResolved.push(exCand);
+      // Also include external entries in resolved list so getAllowedPaths reports them
+      resolved.push(exCand);
+    }
+
     for (const e of entries) {
-      // If relative (starts with ./ or not absolute), resolve against workspaceRoot
+      if (!e || String(e).trim() === '') continue;
       let candidate = e;
       if (!path.isAbsolute(candidate)) candidate = path.resolve(workspaceRoot, candidate);
       else candidate = path.resolve(candidate);
-
-      // Prefer realpath when possible
       try { if (fileExists(candidate)) candidate = fs.realpathSync(candidate); } catch (err) { /* leave candidate as-is */ }
 
-      // Only include entries that are inside the workspaceRoot to avoid granting external access by default
       const normalizedRoot = path.resolve(workspaceRoot);
       if (candidate === normalizedRoot || candidate.startsWith(normalizedRoot + path.sep)) {
         resolved.push(candidate);
+        continue;
+      }
+
+      // If candidate is absolute and outside workspace, only include if present in externalAllowedPaths
+      if (path.isAbsolute(e)) {
+        // compare against externalResolved
+        for (const ex of externalResolved) {
+          if (ex === candidate) { resolved.push(candidate); break; }
+        }
       }
     }
     return resolved;
