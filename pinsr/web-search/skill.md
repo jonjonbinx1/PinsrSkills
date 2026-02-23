@@ -8,6 +8,7 @@ language: "node"
 permissions:
   - "network"
 tags: ["search","web"]
+contributor: "pinsr"
 ---
 
 # Web Search Skill

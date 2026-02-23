@@ -8,6 +8,7 @@ language: "node"
 permissions:
   - "filesystem:write"
 tags: ["editor","patch"]
+contributor: "pinsr"
 ---
 
 # Editor Skill

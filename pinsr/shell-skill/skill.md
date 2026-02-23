@@ -8,6 +8,7 @@ language: "node"
 permissions:
   - "process:exec"
 tags: ["shell","utility"]
+contributor: "pinsr"
 ---
 
 # Shell Skill

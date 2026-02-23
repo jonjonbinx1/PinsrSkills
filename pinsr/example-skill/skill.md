@@ -12,6 +12,7 @@ tags:
   - "example"
   - "utility"
   - "demo"
+contributor: "pinsr"
 ---
 
 # Example Skill

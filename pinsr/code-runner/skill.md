@@ -8,6 +8,7 @@ language: "node"
 permissions:
   - "vm"
 tags: ["code","runtime"]
+contributor: "pinsr"
 ---
 
 # Code Runner Skill

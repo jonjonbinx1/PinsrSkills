@@ -1,6 +1,6 @@
 ---
 name: "fs-skill"
-version: "1.0.1"
+version: "1.0.2"
 description: "Read and modify files in the agent workspace."
 requires_code: true
 entrypoint: "run.js"
@@ -21,6 +21,7 @@ ui:
         allowExternal: false    # external absolute paths require admin allowlist
         preferRelpath: true
         multiple: false
+contributor: "pinsr"
 ---
 
 # File System Skill
