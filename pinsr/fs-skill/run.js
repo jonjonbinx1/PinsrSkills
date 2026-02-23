@@ -111,8 +111,9 @@ function loadAllowedPathsConfig(agentId, workspaceRoot) {
     const globalConfig = path.join(PINSR_ROOT, 'skill-config', `${SKILL_NAME}.yaml`);
 
     let content = null;
-    if (fileExists(agentConfig)) content = fs.readFileSync(agentConfig, 'utf8');
-    else if (fileExists(globalConfig)) content = fs.readFileSync(globalConfig, 'utf8');
+    let source = null; // 'agent' | 'global'
+    if (fileExists(agentConfig)) { content = fs.readFileSync(agentConfig, 'utf8'); source = 'agent'; }
+    else if (fileExists(globalConfig)) { content = fs.readFileSync(globalConfig, 'utf8'); source = 'global'; }
     if (!content) return [];
 
     const entries = parseAllowedPathsFromYaml(content);
@@ -144,11 +145,17 @@ function loadAllowedPathsConfig(agentId, workspaceRoot) {
         continue;
       }
 
-      // If candidate is absolute and outside workspace, only include if present in externalAllowedPaths
+      // If candidate is absolute and outside workspace, include when:
+      // - it's listed in externalAllowedPaths, OR
+      // - it came from a per-agent config (source === 'agent') and the user saved it there
       if (path.isAbsolute(e)) {
-        // compare against externalResolved
+        let added = false;
         for (const ex of externalResolved) {
-          if (ex === candidate) { resolved.push(candidate); break; }
+          if (ex === candidate) { resolved.push(candidate); added = true; break; }
+        }
+        if (!added && source === 'agent') {
+          // honor agent-config absolute entries per user preference
+          resolved.push(candidate);
         }
       }
     }
