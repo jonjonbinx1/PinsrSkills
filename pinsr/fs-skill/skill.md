@@ -57,59 +57,45 @@ contributor: "pinsr"
 
 **List a directory**
 ```
-[SKILL:fs-skill]{"action":"listDirectory","params":{"path":"src/"}}
+[SKILL:pinsr/fs-skill]{"action":"listDirectory","params":{"path":"src/"}}
 ```
 
 **Get file metadata**
 ```
-[SKILL:fs-skill]{"action":"stat","params":{"path":"src/hello.ts"}}
+[SKILL:pinsr/fs-skill]{"action":"stat","params":{"path":"src/hello.ts"}}
 ```
 
 **Check existence**
 ```
-[SKILL:fs-skill]{"action":"exists","params":{"path":"src/hello.ts"}}
+[SKILL:pinsr/fs-skill]{"action":"exists","params":{"path":"src/hello.ts"}}
 ```
 
 **Copy a file**
 ```
-[SKILL:fs-skill]{"action":"copyFile","params":{"src":"src/hello.ts","dest":"src/hello.backup.ts"}}
+[SKILL:pinsr/fs-skill]{"action":"copyFile","params":{"src":"src/hello.ts","dest":"src/hello.backup.ts"}}
 ```
 
 **Move / rename a file**
 ```
-[SKILL:fs-skill]{"action":"moveFile","params":{"src":"src/hello.ts","dest":"src/greet.ts"}}
+[SKILL:pinsr/fs-skill]{"action":"moveFile","params":{"src":"src/hello.ts","dest":"src/greet.ts"}}
 ```
 
 **Delete a file**
 ```
-[SKILL:fs-skill]{"action":"deleteFile","params":{"path":"src/greet.ts"}}
+[SKILL:pinsr/fs-skill]{"action":"deleteFile","params":{"path":"src/greet.ts"}}
 ```
 
 **Create a directory**
 ```
-[SKILL:fs-skill]{"action":"createDirectory","params":{"path":"src/utils/"}}
+[SKILL:pinsr/fs-skill]{"action":"createDirectory","params":{"path":"src/utils/"}}
 ```
 
 **Delete a directory (recursive)**
 ```
-[SKILL:fs-skill]{"action":"deleteDirectory","params":{"path":"dist/","recursive":true,"confirm":true}}
+[SKILL:pinsr/fs-skill]{"action":"deleteDirectory","params":{"path":"dist/","recursive":true,"confirm":true}}
 ```
 
 **Read raw bytes (byte range)**
 ```
-[SKILL:fs-skill]{"action":"readRaw","params":{"path":"assets/logo.png","start":0,"end":1023}}
+[SKILL:pinsr/fs-skill]{"action":"readRaw","params":{"path":"assets/logo.png","start":0,"end":1023}}
 ```
-
-## When to Call Which Skill
-
-| Need | Use |
-|---|---|
-| Create or write file content | `editor-skill` |
-| Read text content (line range) | `editor-skill` (`openFile`) |
-| Patch or edit file content | `editor-skill` |
-| Move, rename, or delete a file | **fs-skill** |
-| List a directory or check metadata | **fs-skill** |
-| Read raw binary bytes | **fs-skill** (`readRaw`) |
-| Create or delete a directory | **fs-skill** |
-
-````
