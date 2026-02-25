@@ -5,10 +5,13 @@
  * fs-skill/run.js — File System Skill
  *
  * PinsrAI subprocess protocol:
- *   Input:  { "action": "readFile|writeFile|appendFile|deleteFile|listDirectory|stat",
- *             "params": { "path": "...", "content": "...", "encoding": "utf8" },
+ *   Input:  { "action": "readRaw|deleteFile|listDirectory|stat|exists|copyFile|moveFile|createDirectory|deleteDirectory|setPermissions|getPermissions|getAllowedPaths",
+ *             "params": { "path": "...", ... },
  *             "context": { "agentId": "...", "cwd": "..." } }
  *   Output: { "success": true, "output": {...}, "error": null, "metadata": {...} }
+ *
+ * NOTE: File content creation and editing belong to editor-skill.
+ *       Use editor-skill for createFile, appendContent, insertContent, replaceRange, applyPatch.
  */
 
 const fs = require('fs');
@@ -243,127 +246,57 @@ function toRelativePosix(resolvedPath, workspaceRoot) {
 
 // ─── Action handlers ────────────────────────────────────────────────────────
 
-async function handleReadFile(params, workspaceRoot, agentId) {
-  const { path: filePath, encoding = 'utf8' } = params;
+async function handleReadRaw(params, workspaceRoot, agentId) {
+  const { path: filePath, start, end, encoding } = params || {};
   if (!filePath) return respond(false, null, 'Missing required param: path');
-  // Load allowlist first
   const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
 
   let resolved;
   if (path.isAbsolute(filePath)) {
-    // absolute path: resolve and allow only if present in allowed list
     resolved = path.resolve(filePath);
     try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
-    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
       return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
-    }
   } else {
     const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
     if (!safe) return respond(false, null, error);
     resolved = r;
-    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
       return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
-    }
   }
 
   const relRequested = toRelativePosix(resolved, workspaceRoot);
-  if (!fs.existsSync(resolved)) {
+  if (!fs.existsSync(resolved))
     return respond(false, { path: relRequested }, `File not found: ${relRequested}`);
-  }
 
   const stats = fs.statSync(resolved);
-  if (stats.size > MAX_READ_SIZE) {
+  if (stats.size > MAX_READ_SIZE)
     return respond(false, null, `File too large: ${stats.size} bytes (max ${MAX_READ_SIZE})`);
+
+  log(agentId, 'DEBUG', `readRaw: ${resolved} (${stats.size} bytes)`);
+
+  const buf = fs.readFileSync(resolved);
+  const totalBytes = buf.length;
+  const byteStart = (start !== undefined) ? Math.max(0, parseInt(start, 10)) : 0;
+  const byteEnd   = (end   !== undefined) ? Math.min(parseInt(end, 10), totalBytes - 1) : totalBytes - 1;
+  const slice = buf.slice(byteStart, byteEnd + 1);
+
+  const output = {
+    path: relRequested,
+    totalBytes,
+    start: byteStart,
+    end: byteEnd,
+    truncated: byteEnd < totalBytes - 1,
+    content: slice.toString('base64'),
+    contentEncoding: 'base64',
+  };
+  // Convenience: also include decoded text when encoding is requested
+  if (encoding) {
+    try { output.text = slice.toString(encoding); } catch { /* ignore */ }
   }
 
-  log(agentId, 'DEBUG', `readFile: ${resolved} (${stats.size} bytes)`);
-  const content = fs.readFileSync(resolved, encoding);
-
-  respond(true, { content, path: relRequested, found: true }, null, {
-    size: stats.size,
-    mtime: stats.mtime.toISOString(),
-    encoding,
-  });
-}
-
-async function handleWriteFile(params, workspaceRoot, agentId) {
-  const { path: filePath, content, encoding = 'utf8' } = params;
-  if (!filePath) return respond(false, null, 'Missing required param: path');
-  if (content === undefined || content === null) return respond(false, null, 'Missing required param: content');
-  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
-  let resolved;
-  if (path.isAbsolute(filePath)) {
-    resolved = path.resolve(filePath);
-    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
-    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
-      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
-    }
-  } else {
-    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
-    if (!safe) return respond(false, null, error);
-    resolved = r;
-    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
-      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
-    }
-  }
-
-  const contentBuffer = Buffer.from(content, encoding);
-  if (contentBuffer.length > MAX_FILE_SIZE) {
-    return respond(false, null, `Content too large: ${contentBuffer.length} bytes (max ${MAX_FILE_SIZE})`);
-  }
-
-  // Ensure parent directory exists
-  const parentDir = path.dirname(resolved);
-  ensureDirSync(parentDir);
-
-  log(agentId, 'DEBUG', `writeFile: ${resolved} (${contentBuffer.length} bytes)`);
-  fs.writeFileSync(resolved, content, encoding);
-
-  const stats = fs.statSync(resolved);
-  const relOut = toRelativePosix(resolved, workspaceRoot);
-  respond(true, { path: relOut, bytesWritten: contentBuffer.length }, null, {
-    size: stats.size,
-    mtime: stats.mtime.toISOString(),
-  });
-}
-
-async function handleAppendFile(params, workspaceRoot, agentId) {
-  const { path: filePath, content, encoding = 'utf8' } = params;
-  if (!filePath) return respond(false, null, 'Missing required param: path');
-  if (content === undefined || content === null) return respond(false, null, 'Missing required param: content');
-  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
-  let resolved;
-  if (path.isAbsolute(filePath)) {
-    resolved = path.resolve(filePath);
-    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
-    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
-      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
-    }
-  } else {
-    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
-    if (!safe) return respond(false, null, error);
-    resolved = r;
-    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot)) {
-      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
-    }
-  }
-
-  const contentBuffer = Buffer.from(content, encoding);
-  if (contentBuffer.length > MAX_FILE_SIZE) {
-    return respond(false, null, `Content too large: ${contentBuffer.length} bytes (max ${MAX_FILE_SIZE})`);
-  }
-
-  // Ensure parent directory exists
-  ensureDirSync(path.dirname(resolved));
-
-  log(agentId, 'DEBUG', `appendFile: ${resolved} (${contentBuffer.length} bytes)`);
-  fs.appendFileSync(resolved, content, encoding);
-
-  const stats = fs.statSync(resolved);
-  const relOut = toRelativePosix(resolved, workspaceRoot);
-  respond(true, { path: relOut, bytesAppended: contentBuffer.length }, null, {
-    size: stats.size,
-    mtime: stats.mtime.toISOString(),
+  respond(true, output, null, {
+    size: stats.size, mtime: stats.mtime.toISOString(),
   });
 }
 
@@ -559,12 +492,121 @@ async function handleExists(params, workspaceRoot, agentId) {
   }
 }
 
+// ─── New filesystem handlers ─────────────────────────────────────────────────
+
+function resolveAndCheckPath(filePath, workspaceRoot, agentId) {
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return { resolved: null, error: `Access denied by allowedPaths policy: ${filePath}` };
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return { resolved: null, error };
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return { resolved: null, error: `Access denied by allowedPaths policy: ${filePath}` };
+  }
+  return { resolved, error: null };
+}
+
+async function handleCopyFile(params, workspaceRoot, agentId) {
+  const { src, dest } = params || {};
+  if (!src) return respond(false, null, 'Missing required param: src');
+  if (!dest) return respond(false, null, 'Missing required param: dest');
+  const { resolved: srcR, error: e1 } = resolveAndCheckPath(src, workspaceRoot, agentId);
+  if (e1) return respond(false, null, e1);
+  const destAbs = path.isAbsolute(dest) ? path.resolve(dest) : path.resolve(workspaceRoot, dest);
+  const { resolved: destR, error: e2 } = resolveAndCheckPath(dest, workspaceRoot, agentId);
+  if (e2) return respond(false, null, e2);
+  if (!fs.existsSync(srcR)) return respond(false, null, `Source not found: ${src}`);
+  ensureDirSync(path.dirname(destR));
+  fs.copyFileSync(srcR, destR);
+  log(agentId, 'INFO', `copyFile: ${srcR} -> ${destR}`);
+  const stats = fs.statSync(destR);
+  respond(true, { src: toRelativePosix(srcR, workspaceRoot), dest: toRelativePosix(destR, workspaceRoot), size: stats.size }, null, {});
+}
+
+async function handleMoveFile(params, workspaceRoot, agentId) {
+  const { src, dest } = params || {};
+  if (!src) return respond(false, null, 'Missing required param: src');
+  if (!dest) return respond(false, null, 'Missing required param: dest');
+  const { resolved: srcR, error: e1 } = resolveAndCheckPath(src, workspaceRoot, agentId);
+  if (e1) return respond(false, null, e1);
+  const { resolved: destR, error: e2 } = resolveAndCheckPath(dest, workspaceRoot, agentId);
+  if (e2) return respond(false, null, e2);
+  if (!fs.existsSync(srcR)) return respond(false, null, `Source not found: ${src}`);
+  ensureDirSync(path.dirname(destR));
+  fs.renameSync(srcR, destR);
+  log(agentId, 'INFO', `moveFile: ${srcR} -> ${destR}`);
+  respond(true, { src: toRelativePosix(srcR, workspaceRoot), dest: toRelativePosix(destR, workspaceRoot), moved: true }, null, {});
+}
+
+async function handleCreateDirectory(params, workspaceRoot, agentId) {
+  const { path: dirPath } = params || {};
+  if (!dirPath) return respond(false, null, 'Missing required param: path');
+  const { resolved, error } = resolveAndCheckPath(dirPath, workspaceRoot, agentId);
+  if (error) return respond(false, null, error);
+  if (fs.existsSync(resolved)) {
+    const s = fs.statSync(resolved);
+    if (s.isDirectory()) return respond(true, { path: toRelativePosix(resolved, workspaceRoot), created: false, alreadyExists: true }, null, {});
+    return respond(false, null, `Path exists and is not a directory: ${dirPath}`);
+  }
+  fs.mkdirSync(resolved, { recursive: true });
+  log(agentId, 'INFO', `createDirectory: ${resolved}`);
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), created: true }, null, {});
+}
+
+async function handleDeleteDirectory(params, workspaceRoot, agentId) {
+  const { path: dirPath, recursive = false, confirm = false } = params || {};
+  if (!dirPath) return respond(false, null, 'Missing required param: path');
+  if (recursive && !confirm)
+    return respond(false, null, 'Recursive directory delete requires confirm:true');
+  const { resolved, error } = resolveAndCheckPath(dirPath, workspaceRoot, agentId);
+  if (error) return respond(false, null, error);
+  if (!fs.existsSync(resolved)) return respond(false, null, `Directory not found: ${dirPath}`);
+  const s = fs.statSync(resolved);
+  if (!s.isDirectory()) return respond(false, null, `Not a directory: ${dirPath}`);
+  fs.rmSync(resolved, { recursive, force: false });
+  log(agentId, 'INFO', `deleteDirectory: ${resolved} (recursive=${recursive})`);
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), deleted: true }, null, {});
+}
+
+async function handleSetPermissions(params, workspaceRoot, agentId) {
+  const { path: filePath, mode } = params || {};
+  if (!filePath) return respond(false, null, 'Missing required param: path');
+  if (mode === undefined) return respond(false, null, 'Missing required param: mode (octal string, e.g. "755")');
+  const { resolved, error } = resolveAndCheckPath(filePath, workspaceRoot, agentId);
+  if (error) return respond(false, null, error);
+  if (!fs.existsSync(resolved)) return respond(false, null, `Path not found: ${filePath}`);
+  if (process.platform === 'win32') {
+    log(agentId, 'WARN', `setPermissions is a no-op on Windows: ${resolved}`);
+    return respond(true, { path: toRelativePosix(resolved, workspaceRoot), warning: 'setPermissions is a no-op on Windows' }, null, {});
+  }
+  const modeInt = parseInt(String(mode), 8);
+  fs.chmodSync(resolved, modeInt);
+  log(agentId, 'INFO', `setPermissions: ${resolved} mode=${mode}`);
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), mode }, null, {});
+}
+
+async function handleGetPermissions(params, workspaceRoot, agentId) {
+  const { path: filePath } = params || {};
+  if (!filePath) return respond(false, null, 'Missing required param: path');
+  const { resolved, error } = resolveAndCheckPath(filePath, workspaceRoot, agentId);
+  if (error) return respond(false, null, error);
+  if (!fs.existsSync(resolved)) return respond(false, null, `Path not found: ${filePath}`);
+  const stats = fs.statSync(resolved);
+  const modeOctal = (stats.mode & 0o777).toString(8).padStart(3, '0');
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), mode: modeOctal, modeRaw: stats.mode }, null, {});
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 const ACTION_MAP = {
-  readFile: handleReadFile,
-  writeFile: handleWriteFile,
-  appendFile: handleAppendFile,
+  readRaw: handleReadRaw,
+  readFile: handleReadRaw,         // legacy alias
   deleteFile: handleDeleteFile,
   listDirectory: handleListDirectory,
   listDir: handleListDirectory,
@@ -573,6 +615,15 @@ const ACTION_MAP = {
   stat: handleStat,
   getAllowedPaths: handleGetAllowedPaths,
   exists: handleExists,
+  copyFile: handleCopyFile,
+  moveFile: handleMoveFile,
+  rename: handleMoveFile,
+  createDirectory: handleCreateDirectory,
+  mkdir: handleCreateDirectory,
+  deleteDirectory: handleDeleteDirectory,
+  rmdir: handleDeleteDirectory,
+  setPermissions: handleSetPermissions,
+  getPermissions: handleGetPermissions,
 };
 
 let inputData = '';
