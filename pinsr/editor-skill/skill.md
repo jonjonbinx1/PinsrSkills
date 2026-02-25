@@ -1,4 +1,3 @@
-````skill
 ---
 name: "editor-skill"
 version: "2.0.0"
@@ -78,17 +77,3 @@ ui:
 ```
 [SKILL:pinsr/editor-skill]{"action":"applyPatch","params":{"patch":"--- a/src/hello.ts\n+++ b/src/hello.ts\n@@ -1 +1 @@\n-export const greet = () => 'hello';\n+export const greet = (n: string) => `hi ${n}`;","format":"git-diff","confirm":true}}
 ```
-
-## When to Call Which Skill
-
-| Need | Use |
-|---|---|
-| Create or write file content | **editor-skill** |
-| Read text content (line range) | **editor-skill** (`openFile`) |
-| Patch or edit file content | **editor-skill** |
-| Move, rename, or delete a file | `fs-skill` |
-| List a directory or check metadata | `fs-skill` |
-| Read raw binary bytes | `fs-skill` (`readRaw`) |
-| Create or delete a directory | `fs-skill` |
-
-````
