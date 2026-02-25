@@ -55,9 +55,16 @@ function resolveSafePath(relativePath, workspaceRoot) {
   return { safe: true, resolved, error: null };
 }
 
-// ─── Local fs-skill-like allowlist helpers (copied/adapted) ───────────────
-const SKILL_NAME = 'fs-skill';
+// ─── Helpers ───────────────────────────────────────────────────────────────
+const SKILL_NAME = 'editor-skill';
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+function toRelativePosix(resolvedPath, workspaceRoot) {
+  let rel = path.relative(workspaceRoot, resolvedPath);
+  rel = rel.replace(/\\/g, '/');
+  if (!rel || rel === '') return '.';
+  return rel;
+}
 
 function fileExists(p) {
   try { return fs.existsSync(p); } catch { return false; }
@@ -590,6 +597,159 @@ async function handleOpenFile(params, workspaceRoot, agentId) {
   }
 }
 
+// ─── Content handlers (new) ─────────────────────────────────────────────────
+
+async function handleCreateFile(params, workspaceRoot, agentId) {
+  const { path: filePath, content = '', encoding = 'utf8', overwrite = false } = params;
+  if (!filePath) return respond(false, null, 'Missing required param: path');
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  }
+  if (fs.existsSync(resolved) && !overwrite)
+    return respond(false, null, `File already exists: ${filePath}. Use overwrite:true to replace.`);
+  const contentBuffer = Buffer.from(content, encoding);
+  if (contentBuffer.length > MAX_FILE_SIZE)
+    return respond(false, null, `Content too large: ${contentBuffer.length} bytes (max ${MAX_FILE_SIZE})`);
+  ensureDirSync(path.dirname(resolved));
+  const tmpPath = resolved + '.pinsr.tmp';
+  try {
+    fs.writeFileSync(tmpPath, content, encoding);
+    fs.renameSync(tmpPath, resolved);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    return respond(false, null, `createFile failed: ${err.message}`);
+  }
+  log(agentId, 'INFO', `createFile: ${resolved} (${contentBuffer.length} bytes)`);
+  const stats = fs.statSync(resolved);
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), bytesWritten: contentBuffer.length, created: true }, null, {
+    size: stats.size, mtime: stats.mtime.toISOString(),
+  });
+}
+
+async function handleAppendContent(params, workspaceRoot, agentId) {
+  const { path: filePath, content, encoding = 'utf8' } = params;
+  if (!filePath) return respond(false, null, 'Missing required param: path');
+  if (content === undefined || content === null) return respond(false, null, 'Missing required param: content');
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  }
+  if (!fs.existsSync(resolved)) return respond(false, null, `File not found: ${filePath}`);
+  const contentBuffer = Buffer.from(content, encoding);
+  if (contentBuffer.length > MAX_FILE_SIZE)
+    return respond(false, null, `Content too large: ${contentBuffer.length} bytes (max ${MAX_FILE_SIZE})`);
+  fs.appendFileSync(resolved, content, encoding);
+  log(agentId, 'INFO', `appendContent: ${resolved} (+${contentBuffer.length} bytes)`);
+  const stats = fs.statSync(resolved);
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), bytesAppended: contentBuffer.length }, null, {
+    size: stats.size, mtime: stats.mtime.toISOString(),
+  });
+}
+
+async function handleInsertContent(params, workspaceRoot, agentId) {
+  const { path: filePath, line, content, encoding = 'utf8' } = params;
+  if (!filePath) return respond(false, null, 'Missing required param: path');
+  if (content === undefined || content === null) return respond(false, null, 'Missing required param: content');
+  if (line === undefined || line === null) return respond(false, null, 'Missing required param: line');
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  }
+  if (!fs.existsSync(resolved)) return respond(false, null, `File not found: ${filePath}`);
+  const original = fs.readFileSync(resolved, encoding);
+  const lines = original.split(/\r?\n/);
+  const insertAt = Math.max(0, Math.min(parseInt(line, 10), lines.length));
+  const insertLines = content.split(/\r?\n/);
+  lines.splice(insertAt, 0, ...insertLines);
+  const newContent = lines.join('\n');
+  const tmpPath = resolved + '.pinsr.tmp';
+  try {
+    fs.writeFileSync(tmpPath, newContent, encoding);
+    fs.renameSync(tmpPath, resolved);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    return respond(false, null, `insertContent failed: ${err.message}`);
+  }
+  log(agentId, 'INFO', `insertContent: ${resolved} at line ${insertAt}`);
+  const stats = fs.statSync(resolved);
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), insertedAt: insertAt, linesInserted: insertLines.length }, null, {
+    size: stats.size, mtime: stats.mtime.toISOString(),
+  });
+}
+
+async function handleReplaceRange(params, workspaceRoot, agentId) {
+  const { path: filePath, startLine, endLine, newContent, encoding = 'utf8' } = params;
+  if (!filePath) return respond(false, null, 'Missing required param: path');
+  if (startLine === undefined) return respond(false, null, 'Missing required param: startLine');
+  if (endLine === undefined) return respond(false, null, 'Missing required param: endLine');
+  if (newContent === undefined || newContent === null) return respond(false, null, 'Missing required param: newContent');
+  const allowed = loadAllowedPathsConfig(agentId, workspaceRoot);
+  let resolved;
+  if (path.isAbsolute(filePath)) {
+    resolved = path.resolve(filePath);
+    try { if (fileExists(resolved)) resolved = fs.realpathSync(resolved); } catch (e) {}
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  } else {
+    const { safe, resolved: r, error } = resolveSafePath(filePath, workspaceRoot);
+    if (!safe) return respond(false, null, error);
+    resolved = r;
+    if (allowed && allowed.length > 0 && !isTargetAllowedByList(resolved, allowed, workspaceRoot))
+      return respond(false, null, `Access denied by allowedPaths policy: ${filePath}`);
+  }
+  if (!fs.existsSync(resolved)) return respond(false, null, `File not found: ${filePath}`);
+  const original = fs.readFileSync(resolved, encoding);
+  const lines = original.split(/\r?\n/);
+  const s = Math.max(0, parseInt(startLine, 10));
+  const e = Math.min(parseInt(endLine, 10), lines.length - 1);
+  const replacementLines = newContent.split(/\r?\n/);
+  lines.splice(s, e - s + 1, ...replacementLines);
+  const result = lines.join('\n');
+  const tmpPath = resolved + '.pinsr.tmp';
+  try {
+    fs.writeFileSync(tmpPath, result, encoding);
+    fs.renameSync(tmpPath, resolved);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    return respond(false, null, `replaceRange failed: ${err.message}`);
+  }
+  log(agentId, 'INFO', `replaceRange: ${resolved} lines ${s}-${e}`);
+  const stats = fs.statSync(resolved);
+  respond(true, { path: toRelativePosix(resolved, workspaceRoot), replacedLines: { from: s, to: e }, insertedLines: replacementLines.length }, null, {
+    size: stats.size, mtime: stats.mtime.toISOString(),
+  });
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 let inputData = '';
@@ -603,24 +763,23 @@ process.stdin.on('end', () => {
     const agentId = context.agentId || '_unknown';
     const cwd = context.cwd || process.cwd();
 
-    // Supported actions: applyPatch, openFile
-    if (action === 'applyPatch') {
-      handleApplyPatch(params, cwd, agentId).catch((err) => {
-        log(agentId, 'ERROR', `applyPatch failed: ${err.message}`);
-        respond(false, null, `applyPatch failed: ${err.message}`, { durationMs: Date.now() - startTime });
-      });
+    const ACTION_MAP = {
+      applyPatch: handleApplyPatch,
+      openFile: handleOpenFile,
+      createFile: handleCreateFile,
+      appendContent: handleAppendContent,
+      insertContent: handleInsertContent,
+      replaceRange: handleReplaceRange,
+    };
+    const handler = ACTION_MAP[action];
+    if (!handler) {
+      respond(false, null, `Unknown action: "${action}". Supported: ${Object.keys(ACTION_MAP).join(', ')}`, { durationMs: Date.now() - startTime });
       return;
     }
-
-    if (action === 'openFile') {
-      handleOpenFile(params, cwd, agentId).catch((err) => {
-        log(agentId, 'ERROR', `openFile failed: ${err.message}`);
-        respond(false, null, `openFile failed: ${err.message}`, { durationMs: Date.now() - startTime });
-      });
-      return;
-    }
-
-    respond(false, null, `Unknown action: "${action}". Supported: applyPatch, openFile`, { durationMs: Date.now() - startTime });
+    handler(params, cwd, agentId).catch((err) => {
+      log(agentId, 'ERROR', `${action} failed: ${err.message}`);
+      respond(false, null, `${action} failed: ${err.message}`, { durationMs: Date.now() - startTime });
+    });
   } catch (err) {
     respond(false, null, `Failed to parse input: ${err.message}`, { durationMs: Date.now() - startTime });
   }
