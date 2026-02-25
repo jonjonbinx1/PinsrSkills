@@ -1,4 +1,3 @@
-````skill
 ---
 name: "fs-skill"
 version: "2.0.0"
@@ -99,3 +98,4 @@ contributor: "pinsr"
 ```
 [SKILL:pinsr/fs-skill]{"action":"readRaw","params":{"path":"assets/logo.png","start":0,"end":1023}}
 ```
+

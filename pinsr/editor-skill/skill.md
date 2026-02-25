@@ -1,4 +1,3 @@
-````skill
 ---
 name: "editor-skill"
 version: "2.0.0"
@@ -78,3 +77,4 @@ ui:
 ```
 [SKILL:pinsr/editor-skill]{"action":"applyPatch","params":{"patch":"--- a/src/hello.ts\n+++ b/src/hello.ts\n@@ -1 +1 @@\n-export const greet = () => 'hello';\n+export const greet = (n: string) => `hi ${n}`;","format":"git-diff","confirm":true}}
 ```
+
