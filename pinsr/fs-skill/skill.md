@@ -1,3 +1,4 @@
+````skill
 ---
 name: "fs-skill"
 version: "2.0.0"
