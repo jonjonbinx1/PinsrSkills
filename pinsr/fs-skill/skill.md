@@ -1,3 +1,4 @@
+````skill
 ---
 name: "fs-skill"
 version: "2.0.0"
@@ -57,6 +58,49 @@ contributor: "pinsr"
 **List a directory**
 ```
 [SKILL:pinsr/fs-skill]{"action":"listDirectory","params":{"path":"src/"}}
+<<<<<<< HEAD
+=======
+```
+
+**Get file metadata**
+```
+[SKILL:pinsr/fs-skill]{"action":"stat","params":{"path":"src/hello.ts"}}
+```
+
+**Check existence**
+```
+[SKILL:pinsr/fs-skill]{"action":"exists","params":{"path":"src/hello.ts"}}
+```
+
+**Copy a file**
+```
+[SKILL:pinsr/fs-skill]{"action":"copyFile","params":{"src":"src/hello.ts","dest":"src/hello.backup.ts"}}
+```
+
+**Move / rename a file**
+```
+[SKILL:pinsr/fs-skill]{"action":"moveFile","params":{"src":"src/hello.ts","dest":"src/greet.ts"}}
+```
+
+**Delete a file**
+```
+[SKILL:pinsr/fs-skill]{"action":"deleteFile","params":{"path":"src/greet.ts"}}
+```
+
+**Create a directory**
+```
+[SKILL:pinsr/fs-skill]{"action":"createDirectory","params":{"path":"src/utils/"}}
+```
+
+**Delete a directory (recursive)**
+```
+[SKILL:pinsr/fs-skill]{"action":"deleteDirectory","params":{"path":"dist/","recursive":true,"confirm":true}}
+```
+
+**Read raw bytes (byte range)**
+```
+[SKILL:pinsr/fs-skill]{"action":"readRaw","params":{"path":"assets/logo.png","start":0,"end":1023}}
+>>>>>>> 9700563515f3911de6d116ae97f513edfa422301
 ```
 
 **Get file metadata**

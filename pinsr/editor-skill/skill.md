@@ -51,6 +51,34 @@ ui:
 **Create a file**
 ```
 [SKILL:pinsr/editor-skill]{"action":"createFile","params":{"path":"src/hello.ts","content":"export const greet = () => 'hello';\n","encoding":"utf8"}}
+<<<<<<< HEAD
+=======
+```
+
+**Open (read) a file by line range**
+```
+[SKILL:pinsr/editor-skill]{"action":"openFile","params":{"path":"src/hello.ts","range":"0-49","unit":"lines"}}
+```
+
+**Insert two lines at line 5**
+```
+[SKILL:pinsr/editor-skill]{"action":"insertContent","params":{"path":"src/hello.ts","line":5,"content":"// inserted\n// second line\n"}}
+```
+
+**Replace lines 3–4**
+```
+[SKILL:pinsr/editor-skill]{"action":"replaceRange","params":{"path":"src/hello.ts","startLine":3,"endLine":4,"newContent":"export const greet = (name: string) => `hello ${name}`;\n"}}
+```
+
+**Append to a file**
+```
+[SKILL:pinsr/editor-skill]{"action":"appendContent","params":{"path":"src/hello.ts","content":"// end of file\n"}}
+```
+
+**Apply a unified diff**
+```
+[SKILL:pinsr/editor-skill]{"action":"applyPatch","params":{"patch":"--- a/src/hello.ts\n+++ b/src/hello.ts\n@@ -1 +1 @@\n-export const greet = () => 'hello';\n+export const greet = (n: string) => `hi ${n}`;","format":"git-diff","confirm":true}}
+>>>>>>> 9700563515f3911de6d116ae97f513edfa422301
 ```
 
 **Open (read) a file by line range**
