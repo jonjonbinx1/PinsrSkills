@@ -2,6 +2,219 @@
 name: "fs-skill"
 version: "2.0.0"
 description: "Owner of filesystem-level operations. No content creation or text manipulation."
+usage: "Filesystem operations: metadata, moves, copies, and binary-safe reads."
+actions:
+  - name: readRaw
+    purpose: "Read raw bytes or a byte-range from a file (binary-safe)."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+        start: { type: integer, minimum: 0 }
+        end: { type: integer, minimum: 0 }
+      required: ["path"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        data: { type: string }
+        encoding: { type: string }
+      required: ["data"]
+    examples: |
+      {"action":"readRaw","params":{"path":"assets/logo.png","start":0,"end":1023}}
+    constraints:
+      maxBytes: 52428800
+      sandboxedTo: allowedPaths
+      requireConfirm: false
+
+  - name: listDirectory
+    purpose: "Return directory entries (names + types)."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+        includeHidden: { type: boolean }
+      required: ["path"]
+      additionalProperties: false
+    examples: |
+      {"action":"listDirectory","params":{"path":"src/"}}
+  - name: deleteFile
+    purpose: "Delete a file at the given path."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+      required: ["path"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        path: { type: string }
+        deleted: { type: boolean }
+      required: ["path","deleted"]
+    examples: |
+      {"action":"deleteFile","params":{"path":"src/old.txt"}}
+
+  - name: stat
+    purpose: "Return filesystem metadata for a path (size, mtime, type)."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+      required: ["path"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        size: { type: integer }
+        mtime: { type: string }
+        type: { type: string }
+      required: ["size","mtime","type"]
+    examples: |
+      {"action":"stat","params":{"path":"src/hello.ts"}}
+
+  - name: exists
+    purpose: "Return whether a path exists."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+      required: ["path"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        exists: { type: boolean }
+      required: ["exists"]
+    examples: |
+      {"action":"exists","params":{"path":"src/hello.ts"}}
+
+  - name: copyFile
+    purpose: "Copy a file from src to dest." 
+    paramsSchema:
+      type: object
+      properties:
+        src: { type: string }
+        dest: { type: string }
+        overwrite: { type: boolean }
+      required: ["src","dest"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        src: { type: string }
+        dest: { type: string }
+        copied: { type: boolean }
+      required: ["src","dest","copied"]
+    examples: |
+      {"action":"copyFile","params":{"src":"src/hello.ts","dest":"src/hello.bak.ts"}}
+
+  - name: moveFile
+    purpose: "Move or rename a file (src -> dest)."
+    paramsSchema:
+      type: object
+      properties:
+        src: { type: string }
+        dest: { type: string }
+      required: ["src","dest"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        src: { type: string }
+        dest: { type: string }
+        moved: { type: boolean }
+      required: ["src","dest","moved"]
+    examples: |
+      {"action":"moveFile","params":{"src":"src/hello.ts","dest":"src/greet.ts"}}
+
+  - name: createDirectory
+    purpose: "Create a directory (recursive)."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+        recursive: { type: boolean }
+      required: ["path"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        path: { type: string }
+        created: { type: boolean }
+      required: ["path","created"]
+    examples: |
+      {"action":"createDirectory","params":{"path":"src/utils/","recursive":true}}
+
+  - name: deleteDirectory
+    purpose: "Delete a directory; use `recursive:true` to remove non-empty directories (may require `confirm`)."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+        recursive: { type: boolean }
+        confirm: { type: boolean }
+      required: ["path"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        path: { type: string }
+        deleted: { type: boolean }
+      required: ["path","deleted"]
+    examples: |
+      {"action":"deleteDirectory","params":{"path":"dist/","recursive":true,"confirm":true}}
+
+  - name: setPermissions
+    purpose: "Set POSIX permission bits for a path (no-op on Windows)."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+        mode: { type: string }
+      required: ["path","mode"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        path: { type: string }
+        mode: { type: string }
+        success: { type: boolean }
+      required: ["path","mode","success"]
+    examples: |
+      {"action":"setPermissions","params":{"path":"bin/script.sh","mode":"0755"}}
+
+  - name: getPermissions
+    purpose: "Return current permission bits for a path."
+    paramsSchema:
+      type: object
+      properties:
+        path: { type: string }
+      required: ["path"]
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        path: { type: string }
+        mode: { type: string }
+      required: ["path","mode"]
+    examples: |
+      {"action":"getPermissions","params":{"path":"bin/script.sh"}}
+
+  - name: getAllowedPaths
+    purpose: "Return the configured allowedPaths list (per-agent or global)."
+    paramsSchema:
+      type: object
+      properties: {}
+      required: []
+      additionalProperties: false
+    resultSchema:
+      type: object
+      properties:
+        allowedPaths: { type: array }
+      required: ["allowedPaths"]
+    examples: |
+      {"action":"getAllowedPaths","params":{}}
 requires_code: true
 entrypoint: "run.js"
 language: "node"
